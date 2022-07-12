@@ -29,13 +29,20 @@ import torch
 from cue_conflict_dataset import CueConflictDataloader
 import csv
 from tqdm import tqdm
+from pl_bolts.models.self_supervised import SimCLR
 
 
 """ 
 EVALUATION
 """
 #dataset = ImageFolder("./cue-conflict",transform=transforms.ToTensor())
-model = models.resnet101(pretrained=True)
+
+#model = models.resnet50(pretrained=True)
+#model.fc = SimCLR(0,1,1,None).encoder.fc
+checkpoint = torch.load("./checkpoint_100.tar",map_location=torch.device('cpu'))
+model = models.resnet50().load_state_dict(checkpoint)
+
+
 #simple_mapp = ImageNetProbabilitiesTo1000ClassNamesMapping()
 dataloader = CueConflictDataloader()("cue-conflict",True,10,4)
 file_name = "results.csv"
@@ -86,11 +93,12 @@ def plot(filename="results.csv",verbose=True):
 
 
 def evaluate(dataloader,model,filename="results.csv",verbose=True):
-    evaluate(dataloader,model,filename=filename)
+    run(dataloader,model,filename=filename)
     info = plot(filename,verbose)
     return info
 
 
+evaluate(dataloader,model)
 
 
 

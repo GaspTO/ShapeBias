@@ -37,7 +37,31 @@ unfreeze_all(model)
 
 
 
+import ligthning
+
+class model(lightning)
+	def __init__(self,model):
+		self.model = model
+		
+	
+	def forward(x):
+		return self.model(x)
+
+
+        def validatation_step(self,x):
+		pass
+		
+
+	def train_step(self,x):
+		pass
+		
+
+	def freeze_layers_except_fc(self):
+		pass	
+	
+	
 
         
+trainer = Trainer()
+trainer.fit()
 
-        
