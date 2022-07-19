@@ -31,6 +31,7 @@ import csv
 from tqdm import tqdm
 from pl_bolts.models.self_supervised import SimCLR
 import os
+from sklearn.neighbors import KNeighborsClassifier
 
 
 
@@ -46,6 +47,7 @@ class ShapeBiasEvaluator:
         else:
             self.device = device
 
+       
     def _run(self,model,filename="results.csv",max_lines=None):
         max_lines = max_lines if max_lines is not None else -1        
         mapp = ImageNetProbabilitiesTo16ClassNamesMapping()
@@ -62,6 +64,34 @@ class ShapeBiasEvaluator:
                         max_lines -= 1
                         if max_lines == 0: break
                 if max_lines == 0: break
+
+    def _knn(self,model,X,raw_y,filename="results.csv",max_lines=None):
+        mapp = ImageNetProbabilitiesTo16ClassNamesMapping()
+
+        a = torch.zeros(1,1000)
+        a[raw_y] = 1.0
+        classes_batch = mapp(a.cpu().numpy())
+
+        print(classes_batch)
+
+        '''
+        max_lines = max_lines if max_lines is not None else -1        
+        mapp = ImageNetProbabilitiesTo16ClassNamesMapping()
+        with open(filename,"w") as fp:
+            writer = csv.writer(fp)
+            writer.writerow(["response", "shape","texture", "imagename"])
+            for x,shapes,textures,paths in tqdm(self.dataloader):
+                with torch.no_grad():
+                    x = x.to(self.device)
+                    features = model(x)
+                
+                    classes_batch = mapp(output.cpu().numpy())
+                    for classes,shape,texture,path in zip(classes_batch,shapes,textures,paths):
+                        writer.writerow([classes[0],shape,texture,path])
+                        max_lines -= 1
+                        if max_lines == 0: break
+                if max_lines == 0: break
+        '''
 
     def _summarize(self,filename="results.csv",verbose=True):
         results = {}
@@ -103,6 +133,7 @@ class ShapeBiasEvaluator:
 
 if __name__ == '__main__':
     import timm
+    import sys
     #model = models.resnet18(pretrained=True)
     model = timm.create_model('resnet18d',pretrained=True)
     dataloader = CueConflictDataloader()("cue-conflict",True,128,4)

@@ -2,8 +2,9 @@
 from torchvision import datasets, transforms as T, models
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from albumentations.augmentations import ColorJitter, Blur, GaussNoise, GaussianBlur
+from albumentations.augmentations import ColorJitter, Blur, GaussNoise, GaussianBlur, ToGray
 from torch.utils.data import Dataset
+
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
@@ -82,6 +83,11 @@ def check_if_frozen_but_fc(model):
             assert not params.requires_grad
 
 def unormalize(batch,device):
+    """
+    Image net models normalize the images based on pixel 
+    averages. This code unormalizes them. 
+    This might be useful if we want to plot/watch the image.
+    """
     x = batch
 
     mean1 = torch.ones(1,x[0].shape[1],x[0].shape[2]) * 0.485
@@ -105,48 +111,42 @@ def unormalize(batch,device):
 """ Model """
 
 class Modelo(pl.LightningModule):
-    def __init__(self,pretrained=True): 
-            super().__init__()
-            self.model = models.resnet50(pretrained=pretrained)    
-    
+    def __init__(self,pretrained=True,optimizer=None): 
+        super().__init__()
+        self.model = models.resnet18(pretrained=pretrained)    
+        self.optimizer = optimizer
+
     def forward(self,x):
-            embedding = self.model(x)
-            return embedding
+        embedding = self.model(x)
+        return embedding
 
     def configure_optimizers(self):
-            #self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-4,weight_decay=1e-4)
-            self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
-            return self.optimizer
+        if self.optimizer is None:
+            #self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
+            self.optimizer = torch.optim.SGD(self.parameters(),0.0001, weight_decay=1e-4,momentum=0.9)
+        return self.optimizer
 
         
     def training_step(self,train_batch,batch_idx):
-            assert self.model.training
-            #check_if_frozen_but_fc(self.model)
-            x, y = train_batch
-            x = x.float()
-            z = self.model(x)    
-            loss = F.cross_entropy(z, y)
-            self.log('train_loss', loss)
-
-
-            #self.experiment.image(0, x)
-            tensorboard = self.logger.experiment
-            x = unormalize(x,torch.device("cuda"))
-            tensorboard.add_images('new_images',x.to(torch.uint8),batch_idx)
-
-            #tensorboard.add_images('images',x[0].to(torch.uint8).unsqueeze(0),batch_idx)
-            #tensorboard.add_images('new_images',new_x.to(torch.uint8),batch_idx)
-            #print(x[0].dtype)
-            #print(type(tensorboard))
-            return loss
+        assert self.model.training
+        #check_if_frozen_but_fc(self.model)
+        x, y = train_batch
+        x = x.float()
+        z = self.model(x)    
+        loss = F.cross_entropy(z, y)
+        self.log('train_loss', loss)
+        tensorboard = self.logger.experiment
+        x = unormalize(x,torch.device("cuda"))
+        tensorboard.add_images('new_images',x.to(torch.uint8),batch_idx)
+        return loss
 
     def validation_step(self,val_batch,batch_idx):
-            assert not self.model.training
-            #check_if_frozen_but_fc(self.model)
-            x, y = val_batch
-            z = self.model(x)
-            loss = F.cross_entropy(z, y)
-            self.log('val_loss', loss)
+        assert not self.model.training
+        #check_if_frozen_but_fc(self.model)
+        x, y = val_batch
+        z = self.model(x)
+        loss = F.cross_entropy(z, y)
+        self.log('val_loss', loss)
      
     def freeze_all_but_fc(self):
         freeze_all_but_fc(self.model)
@@ -159,7 +159,12 @@ class Modelo(pl.LightningModule):
     
 
 """ Callback/Hook for Torch Lightning """
-class MyEvaluation(Callback):
+class EvaluationHook(Callback):
+    """
+    This is a hook that is called on the start of the validation
+    epoch and it calculates the accuracy of the model on the validation set
+    and the shape-texture bias
+    """
     def __init__(self,val_dataset,train_dataset):
         super().__init__()
         self.val_dataset = val_dataset
@@ -185,10 +190,9 @@ class MyEvaluation(Callback):
 
 """ Main """
 def main():
-    """ Initializations """
-    model = Modelo()
+    """ Transformations """ 
+    #TODO pass these transformations to another place, probably a new fail
 
-    """ Transformations """
     null_transform = A.Compose([A.Resize(224, 224),
                                 ToTensorV2()])
 
@@ -198,13 +202,12 @@ def main():
                             T.Resize((224,224))]) 
 
     standard_transform = A.Compose([
-                                    A.Normalize(
-                                        mean=[0.485, 0.456, 0.406],
-                                        std=[0.229, 0.224, 0.225],
-                                    ),
-                                    A.Resize(224, 224), 
-                                    ToTensorV2()
-                                ])
+                                A.Normalize(
+                                    mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225],
+                                ),
+                                A.Resize(224, 224), 
+                                ToTensorV2()])
 
 
     special_transform = A.Compose([
@@ -218,8 +221,7 @@ def main():
                                         GaussianBlur(p=1),
                                         GaussNoise(p=1),
                                 ],p=0.5),
-                                ToTensorV2()
-    ])
+                                ToTensorV2()])
 
     gaussnoise_transform = A.Compose([
                                 A.Normalize(
@@ -228,8 +230,7 @@ def main():
                                 ),
                                 A.Resize(224, 224),
                                 GaussNoise(var_limit=(0.0,0.005),p=1), #!
-                                ToTensorV2()
-    ])
+                                ToTensorV2()])
 
 
     color_jitter_transform = A.Compose([
@@ -239,27 +240,62 @@ def main():
                                 ),
                                 A.Resize(224, 224),
                                 ColorJitter(p=1), #!
-                                ToTensorV2()
+                                ToTensorV2()])
+
+
+    contrast_transform = A.Compose([
+                            A.Normalize(
+                                mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225],
+                            ),
+                            A.Resize(224, 224),
+                            A.RandomBrightnessContrast(p=1), #!
+                            ToTensorV2()])
+
+
+    gray_transform = A.Compose([
+                        A.Normalize(
+                            mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225],
+                        ),
+                        A.Resize(224, 224),
+                        A.ToGray(p=1), #!
+                        ToTensorV2()])
+
+    correct_transformation = T.Compose([
+                                T.ToTensor(),
+                                models.ResNet50_Weights.DEFAULT.transforms()
     ])
 
-
+    train_transform = T.Compose([
+            T.ToTensor(),
+            T.RandomResizedCrop(224),
+            T.RandomHorizontalFlip(),
+            T.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225]),
+        ])
+    val_transform = T.Compose([
+            T.ToTensor(),
+            T.Resize(256),
+            T.CenterCrop(224),
+            T.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225]),
+        ])
 
 
     
-
-    print("using special transform")
-    dataset = ImageNetDataset()
+    """ Initializations """
+    model = Modelo(False)
+    dataset = ImageNetDataset() 
     print(len(dataset))
             
 
     """ Prepare model and check its accuracy"""
-    model.reset_fc() 
-    model.freeze_all_but_fc() 
+    #model.reset_fc() # uncomment to reset mlp
+    #model.freeze_all_but_fc() 
     model.eval()
-    #acc = get_accuracy(model,Transform_Dataset(dataset,transform=standard_transform),1000) #!
+
     acc = get_accuracy(model,Transform_Dataset(dataset,transform=standard_transform),10)
-    print("accuracy:"+str(acc)) #should be pretty low, if not 0.0
-    assert acc < 0.10
+    print("\ninitial_accuracy:"+str(acc)) 
+    assert acc < 0.10 #this is to check that when we reset, the accuracy is bad
 
 
     """ Train"""
@@ -268,18 +304,16 @@ def main():
 
     train_data, val_data = random_split(split_dataset, [int(len(split_dataset)*train_val_percentage), len(split_dataset)-int(len(split_dataset)*train_val_percentage)])
     
-    train_data = Transform_Dataset(train_data,transform=gaussnoise_transform) #!
-    val_data = Transform_Dataset(val_data,transform=standard_transform)
+    train_data = Transform_Dataset(train_data,transform=train_transform) #!
+    val_data = Transform_Dataset(val_data,transform=val_transform)
 
     print("size of train dataset used: "+str(len(train_data)))
     print("size of val dataset used: "+str(len(val_data)))
-    #train_loader = DataLoader(train_data, batch_size=64,num_workers=10,persistent_workers=True) #!
-    #val_loader = DataLoader(val_data, batch_size=64,num_workers=10,persistent_workers=True) #!
+
     train_loader = DataLoader(train_data, batch_size=64,num_workers=10,persistent_workers=True,shuffle=True) #!
     val_loader = DataLoader(val_data, batch_size=64,num_workers=10,persistent_workers=True,shuffle=False) #!
 
-    #logger = TensorBoardLogger('logs', name='test')
-    trainer = pl.Trainer(gpus=[0],callbacks=[MyEvaluation(val_data,train_data)])
+    trainer = pl.Trainer(gpus=[0],callbacks=[EvaluationHook(val_data,train_data)])
     trainer.fit(model, train_loader, val_loader)
 
 
@@ -287,20 +321,3 @@ if __name__ == '__main__':
     main()
 
 
- #gaussian blur 0.5 Default resnet18 ZEZERE --- killed not work
- 
- #gaussian blur 1  Default resnet18 ZEZERE --- kileed not work
-
- #gaussian blur 0 Default resnet18 TEJO -- killed works well
- 
- #gaussian blur 1 (0,2) resnet18 Zezere -- killed not work
-
- #gaussian blur 1 (0,0.5) resnet18 Zezere -- killed not work
-
- #gaussian blur 1 (0,0.05) resnet18 Zezere 
-
- #color jitter Default resnet18 Tejo -- killed not work
-
- #gaussian blur 1 (0,0.005) resnet18 Zezere
-
- #gaussian blur 1 (0,0.005) resnet50 tejo
