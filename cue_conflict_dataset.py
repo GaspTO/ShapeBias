@@ -42,6 +42,7 @@ class CueConflictDataloader(object):
                                          std=[0.229, 0.224, 0.225])
 
         if resize:
+            raise ValueError("This is not supposed to be used")
             transformations = transforms.Compose([
                 transforms.Resize(256),
                 transforms.CenterCrop(224),

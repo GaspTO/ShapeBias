@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 
 from helper import human_categories as hc
 from helper import wordnet_functions as wnf
-
+import pandas as pd
 
 class DecisionMapping(ABC):
     def check_input(self, probabilities):

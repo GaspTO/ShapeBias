@@ -113,7 +113,8 @@ def unormalize(batch,device):
 class Modelo(pl.LightningModule):
     def __init__(self,pretrained=True,optimizer=None): 
         super().__init__()
-        self.model = models.resnet18(pretrained=pretrained)    
+        #self.model = models.resnet18(pretrained=pretrained)    
+        self.model = models.alexnet(pretrained=pretrained)
         self.optimizer = optimizer
 
     def forward(self,x):
