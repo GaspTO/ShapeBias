@@ -28,7 +28,7 @@ class ShapeBiasEvaluator:
         else:
             self.device = device
        
-    def __call__(self,model,print_results=False):
+    def __call__(self,model,print_results=False,log_intermediate=False):
         """
         return: dictionary with some statistics
         args:
@@ -50,7 +50,8 @@ class ShapeBiasEvaluator:
         label_choices = mapp(probabilities.cpu().numpy())
         filenames = list(map(lambda x:re.sub(".*/.*/","",x) , paths))
         data = pd.DataFrame(data={"label_choice":label_choices[:,0], "shape":shapes, "texture":textures, "filename":filenames})
-        self._log_intermediate_calculations(logits,probabilities,filenames)
+        if log_intermediate:
+            self._log_intermediate_calculations(logits,probabilities,filenames)
         data = data[data["shape"] != data["texture"]]
         statistics = self._calculate_statistics(data)
         if print_results: self._print_statistics(statistics)
