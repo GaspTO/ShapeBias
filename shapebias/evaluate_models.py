@@ -52,7 +52,7 @@ class ShapeBiasEvaluator:
         data = pd.DataFrame(data={"label_choice":label_choices[:,0], "shape":shapes, "texture":textures, "filename":filenames})
         if log_intermediate:
             self._log_intermediate_calculations(logits,probabilities,filenames)
-        data = data[data["shape"] != data["texture"]]
+        data = data[data["shape"] != data["texture"]] #remove data without conflict
         statistics = self._calculate_statistics(data)
         if print_results: self._print_statistics(statistics)
         return statistics
