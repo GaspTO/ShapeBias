@@ -1,34 +1,39 @@
+""" system """
+import importlib
 import os
 import sys
 
-""" Fine-tuning last layer models """
+""" Torch, Augmentations and PL  """
+import torch
 from torchvision import datasets, transforms as T, models
+from torch.utils.data import Dataset, random_split, DataLoader
+from torch.nn import functional as F
+from torch.optim import lr_scheduler 
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from albumentations.augmentations import ColorJitter, Blur, GaussNoise, GaussianBlur, ToGray
-from torch.utils.data import Dataset, random_split, DataLoader
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.strategies import DDPStrategy
+from pytorch_lightning.loggers import WandbLogger
 
-from torch.nn import functional as F
-
-""" Imports from torch core """
+""" Imports from this directory """
 from shapebias.helper.imagenet_dataset import ImageNetDataset
 from shapebias.helper.auxiliary import get_accuracy
 from shapebias.models.basic import BasicNetwork
 from shapebias.helper import *
-
-""" Imports from this directory """
 from shapebias.evaluate_models import ShapeBiasEvaluator
 from shapebias.cue_conflict_dataset import CueConflictDataloader
 
-""" debugg """
+""" others """
 from pympler import asizeof
+import wandb
+import argparse
 
 
 """ Helper class """
+#TODO move this to the helper directory
 class Transform_Dataset(Dataset):
     """
     This is so that we can take a dataset and append it a transformation.
@@ -54,6 +59,7 @@ class Transform_Dataset(Dataset):
 
    
 """ Callback/Hook for Torch Lightning """
+#TODO move this to its special directory
 class EvaluationHook(Callback):
     """
     This is a hook that is called on the start of the validation
@@ -87,41 +93,30 @@ class EvaluationHook(Callback):
     
 
 """ Main """
-def main():
-    """ Transformations """ 
-    train_transform = T.Compose([
-            T.ToTensor(),
-            T.RandomResizedCrop(224),
-            T.RandomHorizontalFlip(),
-            T.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225]),
-        ])
-    val_transform = T.Compose([
-            T.ToTensor(),
-            T.Resize(256),
-            T.CenterCrop(224),
-            T.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225]),
-        ])
+def main(configuration_module):
+    """ Init Configuration """
+    config = configuration_module.config
+    wandb_logger = wandb.init(config=config,name='noise_blur_color',project='Imagenet_Shapebias')
+    wandb_logger.save(configuration_module.__file__)
 
+    """ End Configurations """
+    
+    config["gpus"] = [1]
 
-    """ Initializations """
-    net = models.resnet18(False)
-    model = BasicNetwork(net)
-    train_dataset = ImageNetDataset(img_dir="/media/imagenet/train/",transform=train_transform)
-    val_dataset = ImageNetDataset(img_dir="/media/imagenet/val/",transform=val_transform)  
-    print("train dataset length: " + str(len(train_dataset)))
-    print("validation dataset length: " + str(len(val_dataset)))
-
-    train_loader = DataLoader(train_dataset, batch_size=256,num_workers=10,persistent_workers=True,shuffle=True) #!
-    val_loader = DataLoader(val_dataset, batch_size=1024,num_workers=10,persistent_workers=True,shuffle=False) #!
-
+    """ Training """
     trainer = pl.Trainer(
-                gpus=[0],
-                callbacks=[EvaluationHook(val_dataset,train_dataset)],
-                )   
-    trainer.fit(model, train_loader, val_loader)
+                gpus=config["gpus"],
+                callbacks=[EvaluationHook(configuration_module.val_dataset,configuration_module.train_dataset)],
+                logger= WandbLogger(experiment=wandb_logger,save_dir='logs'))   
+    trainer.fit(configuration_module.model, configuration_module.train_loader, configuration_module.val_loader)
+
 
 
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) < 2:
+        raise Exception("Introduce the configuration module at configurations directory (for example \"simple_imagenet\")")
+    configuration_module = importlib.import_module("configurations."+sys.argv[1])
+    main(configuration_module)
+
 
 
